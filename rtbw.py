@@ -1,3 +1,4 @@
+
 import sys
 import os
 import os.path
@@ -11,7 +12,7 @@ import datetime
 import json
 import re
 import time
-import threading
+from threading import Thread, Lock
 import binascii
 import pylzma
 from cffi import FFI
@@ -75,9 +76,15 @@ class StatBuffer:
 	SLV_NOPI = 2 #Remove all poster information (sub,com,name,trip)
 	SLV_NOUI = 3 #Remove all user inputed information (sub, com,name,trip, file info)
 	SLV_HIGH = 0xFF #Keep only post number	
+	
 
 	def __init__(self):
+		self._mutex = Lock()
 		pass
+	def _lock(self):
+		self._mutex.acquire()
+	def _unlock(self):
+		self._mutex.release()
 	def _decode(self, data):
 		if(isinstance(data, int)):
 			return data
@@ -128,75 +135,132 @@ class StatBuffer:
 
 class MemoryBuffer(StatBuffer):
 	def __init__(self, level):
+		super().__init__()
 		self.lvl = level
 		self.store = list()
 	def write(self, post):
+		super()._lock()
 		data = super()._encode(post, self.lvl)
 		self.store.append(data)
+		super()._unlock()
 	def raw(self):
-		return json.dumps(self.store)
+		super()._lock()
+		try:
+			return json.dumps(self.store)
+		finally:
+			super()._unlock()
 	def clear(self):
+		super()._lock()
 		self.store = list()
+		super()._unlock()
 	def length(self):
-		return len(self.store)
+		super()._lock()
+		try:
+			return len(self.store)
+		finally:
+			super()._unlock()
 	def read(self):
-		base = super()
-		return list(base._decode(d) for d in self.store)
+		super()._lock()
+		try:
+			base = super()
+			return list(base._decode(d) for d in self.store)
+		finally:
+			super()._unlock()
 	def findMax(self):
-		mx=0
-		for ent in self.store:
-			post = super()._decode(ent)
-			if(post["no"]>mx): mx = post["no"]
-		return mx
+		super()._lock()
+		try:
+			if len(self.store)<1: return 0
+			return super()._decode(self.store[-1])["no"]
+		finally:
+			super()._unlock()
+	def readno(self, floor):
+		super()._lock()
+		posts = list()
+		nl = len(self.store)-1
+		while(nl>=0):
+			entry = super()._decode(self.store[nl])
+			if(entry["no"]<=floor): break
+			posts.append(ent)
+			nl-=1
+		super()._unlock()
+		return posts
 
 class FileBuffer(StatBuffer):
 	def __init__(self, fn, level):
+		super().__init__()
 		self.lvl = level
 		self.file = open(fn, "a+b")
 	def write(self, post):
+		super()._lock()
 		data = super()._encode(post, self.lvl)
-		self.file.write(struct.pack("I", len(data)))
 		self.file.write(data)
+		self.file.write(struct.pack("I", len(data)))
+		super()._unlock()
+	def _readentry(self):
+		self.file.seek(-4,1)
+		lentr = self.file.read(4)
+		if len(lentr)<4: return None
+		tl = struct.unpack("I", lentr)[0]
+		self.file.seek(-(tl+4), 1)
+		ret = super()._decode(self.file.read(tl))
+		self.file.seek(-tl,1)
+		return ret
+	def _skipentry(self):
+		self.file.seek(-4,1)
+		lentr = self.file.read(4)
+		if len(lentr)<4: return False
+		tl = struct.unpack("I", lentr)[0]
+		self.file.seek(-(tl+4),1)
+		return True
 	def read(self):
-		self.file.seek(0)
+		super()._lock()
 		posts = list()
-		lentr=self.file.read(4)
-		while( lentr != None):
-			if(len(lentr)<4): break
-			tl = struct.unpack("I", lentr)[0]
-			#pprint.pprint(tl)
-			posts.append(super()._decode(self.file.read(tl)))
-			lentr=self.file.read(4)
-		self.file.seek(0, 2)
+		ent = self._skipentry()
+		while self.file.tell()>0 and ent!=None:
+			posts.append(ent)
+			ent = self._readentry()
+		self.file.seek(0,2)
+		super()._unlock()
 		return posts
 	def length(self):
-		self.file.seek(0)
-		maxln = 0
-		lentr=self.file.read(4) 
-		while(  lentr != None):
-			if(len(lentr)<4): break
-			tl = struct.unpack("I", lentr)[0]
-			self.file.seek(tl, 1)
-			maxln+=1	
-			lentr=self.file.read(4)#wonderful language lmao
-		self.file.seek(0, 2)
-		return maxln
+		super()._lock()
+		ent = self._skipentry()
+		maxl =0
+		while self.file.tell()>0 and ent:
+			maxl+=1
+			ent = self._skipentry()
+		self.file.seek(0,2)
+		super()._unlock()
+		return maxl
 	def close(self):
+		super()._lock()
 		self.file.close()
+		super()._unlock()
 	def clear(self):
+		super()._lock()
 		self.file.truncate()
+		super()._unlock()
 	def findMax(self):
-		self.file.seek(0)
-		mx=0
-		lentr=self.file.read(4) 
-		while(  lentr != None):
-			if(len(lentr)<4): break
-			tl = struct.unpack("I", lentr)[0]
-			post = super()._decode(self.file.read(tl))
-			if(post["no"] > mx): mx = post["no"]
-			lentr=self.file.read(4)#wonderful language lmao
-		self.file.seek(0, 2)
-		return mx
+		super()._lock()
+		try:
+			if(self.file.tell()<1): return 0
+			sk =  self._readentry()
+			self.file.seek(0,2)
+			if sk!=None: return sk["no"]
+			else: return 0
+		finally:
+			super()._unlock()
+	def readno(self, floor):
+		super()._lock()
+		posts = list()
+		ent = self._skipentry()
+		while self.file.tell()>0 and ent!=None:
+			if(ent["no"]<=floor): break
+			posts.append(ent)
+			ent = self._readentry()
+		self.file.seek(0,2)
+		super()._unlock()
+		return posts
 
 def parse_post(post):
 	res = dict()
