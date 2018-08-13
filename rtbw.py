@@ -242,7 +242,7 @@ class FileBuffer(StatBuffer):
 		super()._unlock()
 	def clear(self):
 		super()._lock()
-		self.file.truncate()
+		self.file.truncate(0)
 		super()._unlock()
 	def findMax(self):
 		super()._lock()
@@ -257,7 +257,7 @@ class FileBuffer(StatBuffer):
 	def readno(self, floor):
 		super()._lock()
 		posts = list()
-		ent = self._skipentry()
+		ent = self._readentry()
 		while self.file.tell()>0 and ent!=None:
 			if(ent["no"]<=floor): break
 			posts.append(ent)
