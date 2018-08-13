@@ -27,6 +27,7 @@ class Command(object):
 	CMD_GET = 1
 	CMD_CLEAR = 2
 	CMD_SHUTDOWN = 3
+	CMD_GET_CLEAR = 4
 	
 	def __init__(self):
 		self.uCommand = 0

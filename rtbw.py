@@ -85,10 +85,8 @@ class StatBuffer:
 	SLV_NOUI = 3 #Remove all user inputed information (sub, com,name,trip, file info)
 	SLV_HIGH = 0xFF #Keep only post number	
 	
-
 	def __init__(self):
 		self._mutex = Lock()
-		pass
 	def _lock(self):
 		self._mutex.acquire()
 	def _unlock(self):
@@ -176,7 +174,7 @@ class MemoryBuffer(StatBuffer):
 			return super()._decode(self.store[-1])["no"]
 		finally:
 			super()._unlock()
-	def readno(self, floor):
+	def readno(self, floor, ca=False):
 		super()._lock()
 		posts = list()
 		nl = len(self.store)-1
@@ -185,6 +183,8 @@ class MemoryBuffer(StatBuffer):
 			if(entry["no"]<=floor): break
 			posts.append(entry)
 			nl-=1
+		if ca:
+			self.store = list()
 		super()._unlock()
 		return posts
 
@@ -253,7 +253,7 @@ class FileBuffer(StatBuffer):
 			else: return 0
 		finally:
 			super()._unlock()
-	def readno(self, floor):
+	def readno(self, floor, ca=False):
 		super()._lock()
 		posts = list()
 		if self.file.tell()>0:
@@ -263,6 +263,8 @@ class FileBuffer(StatBuffer):
 				posts.append(ent)
 				ent = self._readentry()
 			self.file.seek(0,2)
+		if ca:
+			self.file.truncate(0)
 		super()._unlock()
 		return posts
 
@@ -352,9 +354,12 @@ class Daemon(threading.Thread):
 		self.buf = buf
 		self.running=True
 		threading.Thread.__init__(self)
-	def _get(self,con, fr):
-		log("[daemon]: Recieved get from "+str(fr))
-		data = self.buf.readno(fr)
+	def _get(self,con, fr, ca=False):
+		if ca:
+			log("[daemon]: Recieved get-clear from "+str(fr))
+		else:
+			log("[daemon]: Recieved get from "+str(fr))
+		data = self.buf.readno(fr, ca)
 		js = json.dumps(data)
 		con.send(js.encode("utf-8"))
 	def run(self):
@@ -373,6 +378,8 @@ class Daemon(threading.Thread):
 					self.running=False
 				elif cmd.uCommand == Command.CMD_GET: #receive entries from <data>
 					self._get(con, struct.unpack("L", cmd.uData)[0])
+				elif cmd.uCommand == Command.CMD_GET_CLEAR: #receive entries from <data> then clear
+					self._get(con, struct.unpack("L", cmd.uData)[0], True)
 				elif cmd.uCommand == Command.CMD_CLEAR: #clear buffer
 					log("[daemon]: Recieved clear")
 					self.buf.clear()

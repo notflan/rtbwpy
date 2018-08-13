@@ -26,6 +26,7 @@ def parsecmd(s):
 	if s=="get": return Command.CMD_GET
 	elif s=="stop": return Command.CMD_SHUTDOWN
 	elif s=="clear": return Command.CMD_CLEAR
+	elif s=="get-clear": return Command.CMD_GET_CLEAR
 	else: return None
 
 parser = argparse.ArgumentParser(description="rtbwpy daemon control.")
@@ -43,7 +44,7 @@ if cmd==None:
 	
 data = args.data
 
-if cmd == Command.CMD_GET:
+if cmd == Command.CMD_GET or cmd == Command.CMD_GET_CLEAR:
 	if data== None:
 		data = struct.pack("L", 0)
 	else:
@@ -58,7 +59,7 @@ cmd = Command.build(cmd, data)
 
 con.send(cmd.serialise())
 
-if cmd.uCommand == Command.CMD_GET:
+if cmd.uCommand == Command.CMD_GET or cmd.uCommand == Command.CMD_GET_CLEAR:
 	json = con.recv().decode("utf-8")
 	print(json)
 
