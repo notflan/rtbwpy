@@ -1,4 +1,3 @@
-
 import sys
 import os
 import os.path
@@ -69,7 +68,7 @@ def encode_post(post):
 	return data
 
 def decode_post(data):
-	js = pylzma.decompress(data)
+	js = pylzma.decompress(data).decode("utf-8")
 	np = json.loads(js)
 	mape = dict((v,k) for k,v in __pmap().items())
 	post = dict()
@@ -257,12 +256,13 @@ class FileBuffer(StatBuffer):
 	def readno(self, floor):
 		super()._lock()
 		posts = list()
-		ent = self._readentry()
-		while self.file.tell()>0 and ent!=None:
-			if(ent["no"]<=floor): break
-			posts.append(ent)
+		if self.file.tell()>0:
 			ent = self._readentry()
-		self.file.seek(0,2)
+			while self.file.tell()>0 and ent!=None:
+				if(ent["no"]<=floor): break
+				posts.append(ent)
+				ent = self._readentry()
+			self.file.seek(0,2)
 		super()._unlock()
 		return posts
 
@@ -432,7 +432,7 @@ if args.daemon!=None:
 		daemon_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 		daemon_sock.bind(args.daemon)
 		daemon_sock.settimeout(5)
-		daemon_sock.listen()
+		daemon_sock.listen(5)
 		
 		daemon = Daemon(daemon_sock, buf)
 		daemon.start()
