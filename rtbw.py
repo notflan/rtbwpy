@@ -349,10 +349,11 @@ def _fork():
 		return os.fork()
 
 class Daemon(threading.Thread):
-	def __init__(self, socket, buf):
+	def __init__(self, socket, buf, info=None):
 		self.sock = socket
 		self.buf = buf
 		self.running=True
+		self.info = info
 		threading.Thread.__init__(self)
 	def _get(self,con, fr, ca=False):
 		if ca:
@@ -383,6 +384,9 @@ class Daemon(threading.Thread):
 				elif cmd.uCommand == Command.CMD_CLEAR: #clear buffer
 					log("[daemon]: Recieved clear")
 					self.buf.clear()
+				elif cmd.uCommand == Command.CMD_INFO: #information
+					log("[daemon]: Recieved info")
+					con.send(json.dumps(self.info).encode("ascii"))
 				else: #unknwon command
 					log("[daemon]: Recieved unknown command")
 					pass
@@ -441,7 +445,7 @@ if args.daemon!=None:
 		daemon_sock.settimeout(5)
 		daemon_sock.listen(5)
 		
-		daemon = Daemon(daemon_sock, buf)
+		daemon = Daemon(daemon_sock, buf, { "timeout": args.timeout, "board": args.board })
 		daemon.start()
 
 try:
