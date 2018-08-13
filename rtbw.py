@@ -9,21 +9,29 @@ import struct
 import pprint
 import time
 import datetime
+import threading
 import json
 import re
 import time
 from threading import Thread, Lock
 import binascii
 import pylzma
-from cffi import FFI
 import select
 from subprocess import Popen, PIPE
 import argparse
+
+from socks.transmission import SocketOverlay
+from socks.transmission import Command
+
 try:
     import ssl
 except ImportError:
     print ("error: no ssl support")
 import requests
+
+DEBUG=False
+
+ShowLog=True
 
 def __pmap():
 	return {
@@ -44,7 +52,8 @@ def __pmap():
 
 
 def log(stre):
-	print (stre)
+	if(ShowLog):
+		print (stre)
 
 def encode_post(post):
 	mape = __pmap()
@@ -90,36 +99,31 @@ class StatBuffer:
 			return data
 		else:
 			return decode_post(data)
+	def _strip(self, post, string):
+		if string in post:
+			del post[string]
+			post["has_"+string] = True
 	def _encode(self, post, striplv):
 		if(striplv == StatBuffer.SLV_LOW):
 			return encode_post(post)
 		elif(striplv == StatBuffer.SLV_NOTEXT):
-			if "com" in post:
-				del post["com"]
-			if "sub" in post:
-				del post["sub"]
+			self._strip(post, "com")
+			self._strip(post, "sub")
 			return encode_post(post)
 		elif(striplv == StatBuffer.SLV_NOPI):
-			if "com" in post:
-				del post["com"]
-			if "sub" in post:
-				del post["sub"]
-			if "name" in post:
-				del post["name"]
-			if "trip" in post:
-				del post["trip"]
+			self._strip(post, "com")
+			self._strip(post, "sub")
+			self._strip(post, "name")
+			self._strip(post, "trip")
 			return encode_post(post)
 		elif(striplv == StatBuffer.SLV_NOUI):
-			if "com" in post:
-				del post["com"]
-			if "sub" in post:
-				del post["sub"]
-			if "name" in post:
-				del post["name"]
-			if "trip" in post:
-				del post["trip"]
+			self._strip(post, "com")
+			self._strip(post, "sub")
+			self._strip(post, "name")
+			self._strip(post, "trip")
+			return encode_post(post)
 			if "filename" in post:
-				del post["filename"]
+				self._strip(post, "filename")
 				del post["fileSize"]
 				del post["realFilename"]
 				del post["image"]
@@ -180,7 +184,7 @@ class MemoryBuffer(StatBuffer):
 		while(nl>=0):
 			entry = super()._decode(self.store[nl])
 			if(entry["no"]<=floor): break
-			posts.append(ent)
+			posts.append(entry)
 			nl-=1
 		super()._unlock()
 		return posts
@@ -336,27 +340,105 @@ def pnomax(last, posts):
 def buffer_write(buf, posts):
 	for post in posts:
 		buf.write(post)
+def _fork():
+	if DEBUG:
+		return 0
+	else:
+		return os.fork()
+
+class Daemon(threading.Thread):
+	def __init__(self, socket, buf):
+		self.sock = socket
+		self.buf = buf
+		self.running=True
+		threading.Thread.__init__(self)
+	def _get(self,con, fr):
+		log("[daemon]: Recieved get from "+str(fr))
+		data = self.buf.readno(fr)
+		js = json.dumps(data)
+		con.send(js.encode("utf-8"))
+	def run(self):
+		while self.running:
+			try:
+				con = SocketOverlay(self.sock.accept()[0])
+				if not self.running:
+					con.close()
+					break
+				log("[daemon]: Connection accepted")
+				read = con.recv()
+				cmd = Command.unserialise(read)
+				
+				if cmd.uCommand == Command.CMD_SHUTDOWN: #shut down daemon
+					log("[daemon]: Recieved shutdown")
+					self.running=False
+				elif cmd.uCommand == Command.CMD_GET: #receive entries from <data>
+					self._get(con, struct.unpack("L", cmd.uData)[0])
+				elif cmd.uCommand == Command.CMD_CLEAR: #clear buffer
+					log("[daemon]: Recieved clear")
+					self.buf.clear()
+				else: #unknwon command
+					log("[daemon]: Recieved unknown command")
+					pass
+				con.close()
+			except socket.timeout:
+				pass
+			except:
+				self.running=False
+				raise
+		log("[daemon]: Exiting")
+		self.sock.close()
+		self.sock=None
+	def close(self):
+		log("[daemon-ctl]: Shutting down")
+		self.running=False
+
 #TODO: When we request buffer data from daemon, send a min post number to send back (last)
 parser = argparse.ArgumentParser(description="Real-time 4chan board watcher.")
 parser.add_argument("board", help="Board to spider")
 parser.add_argument("timeout", help="Time between cycles")
 parser.add_argument("--buffer", help="Save buffer filename (default: use in memory buffer)", default=None)
-parser.add_argument("--daemon", action="store_true", help="Run as daemon")
+parser.add_argument("--daemon", metavar="Socket", help="Run as daemon", default=None)
 parser.add_argument("--api", help="Base URL of 4chan JSON API", default="http://api.4chan.org/%s/")
+parser.add_argument("--debug", default=False, action="store_true")
 
 args = parser.parse_args()
+
+DEBUG = args.debug
+
+StripLevel = StatBuffer.SLV_NOTEXT
+
 last=0
 buf = None
 
 if args.buffer !=None:
-	buf = FileBuffer(args.buffer, StatBuffer.SLV_NOTEXT)
+	buf = FileBuffer(args.buffer, StripLevel)
 else:
-	buf = MemoryBuffer(StatBuffer.SLV_NOTEXT)
+	buf = MemoryBuffer(StripLevel)
 
 last = buf.findMax()
 
+runForever=True
+daemon = None
+
+if args.daemon!=None:
+	pid = _fork()
+	if not pid == 0:
+		log("Process forked to background: PID %d" % pid)
+		sys.exit(0)
+	else:
+		runForever=False
+		if not DEBUG:
+			ShowLog=False
+		daemon_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		daemon_sock.bind(args.daemon)
+		daemon_sock.settimeout(5)
+		daemon_sock.listen()
+		
+		daemon = Daemon(daemon_sock, buf)
+		daemon.start()
+
 try:
-	while True:
+	while runForever or daemon.running:
 		log("Reading threads for %s from %d" % (args.board, last))
 		posts = parse_page(args.api, args.board, "1", last)
 		last = pnomax(last, posts)
@@ -371,5 +453,7 @@ try:
 		time.sleep(int(args.timeout))
 except(KeyboardInterrupt):
 	log("Interrupt detected")
+	if daemon!=None:
+		daemon.close()
 	buf.close()
 log("Closing")
