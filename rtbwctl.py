@@ -28,6 +28,8 @@ def parsecmd(s):
 	elif s=="clear": return Command.CMD_CLEAR
 	elif s=="get-clear": return Command.CMD_GET_CLEAR
 	elif s=="info": return Command.CMD_INFO
+	elif s=="pause": return Command.CMD_PAUSE
+	elif s=="resume": return Command.CMD_RESUME
 	else: return None
 
 parser = argparse.ArgumentParser(description="rtbwpy daemon control.")

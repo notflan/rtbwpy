@@ -370,6 +370,7 @@ class Daemon(threading.Thread):
 		self.buf = buf
 		self.running=True
 		self.info = info
+		self.paused=False
 		threading.Thread.__init__(self)
 	def _get(self,con, fr, ca=False):
 		if ca:
@@ -403,6 +404,12 @@ class Daemon(threading.Thread):
 				elif cmd.uCommand == Command.CMD_INFO: #information
 					log("[daemon]: Recieved info")
 					con.send(json.dumps(self.info).encode("ascii"))
+				elif cmd.uCommand == Command.CMD_PAUSE:
+					log("[daemon]: Recieved pause")
+					self.paused = True
+				elif cmd.uCommand == Command.CMD_RESUME:
+					log("[daemon]: Recieved resume")
+					self.paused = False
 				else: #unknwon command
 					log("[daemon]: Recieved unknown command")
 					pass
@@ -466,16 +473,20 @@ if args.daemon!=None:
 
 try:
 	while runForever or daemon.running:
-		log("Reading threads for %s from %d" % (args.board, last))
-		posts = parse_page(args.api, args.board, "1", last)
-		last = pnomax(last, posts)
-
-		if(len(posts)>0):
-			log("\t%d new posts since last cycle" % len(posts))
-			buffer_write(buf, posts)
+	
+		if(not runForever) and daemon.paused:
+			log("Skipping rotation")
 		else:
-			log("\tnothing new")
-		log("Buffer written successfully")
+			log("Reading threads for %s from %d" % (args.board, last))
+			posts = parse_page(args.api, args.board, "1", last)
+			last = pnomax(last, posts)
+
+			if(len(posts)>0):
+				log("\t%d new posts since last cycle" % len(posts))
+				buffer_write(buf, posts)
+			else:
+				log("\tnothing new")
+			log("Buffer written successfully")
 		
 		time.sleep(int(args.timeout))
 except(KeyboardInterrupt):
