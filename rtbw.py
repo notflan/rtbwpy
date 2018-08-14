@@ -321,13 +321,29 @@ def parse_page(api, board, page, last):
 		if post["no"] <= last:
 			#thread is not new
 			#are there any new posts?
+			newPs=0
+			_nps = list()
 			for vp in thread["posts"]:
 				if(vp["no"] >last):
+					newPs+=1
+					nt = parse_post(vp)
+					if nt!=None:
+						_nps.append(nt)
+				if newPs>2:
 					posts.extend(parse_thread(api,board,post,last))
-					tpd+=1
-					break
+				else:
+					posts.extend(_nps)
+				tpd+=1
+					
 		else:
-			posts.extend(parse_thread(api,board, post,last))
+			if len(thread["posts"])>3:
+				posts.extend(parse_thread(api,board, post,last))
+			else:
+				for vp in thread["posts"]:
+					nt = parse_post(vp)
+					if nt!=None:
+						posts.append(nt)
+					
 			tpd+=1
 	log("\t(threads parsed this rotation: %d)"%tpd)
 	return posts
