@@ -1,0 +1,45 @@
+Real-Time Board Watcher - Python(3) version
+
+This is a configurable script that monitors new posts from 4chan board(s) in various ways with support for daemonisation and JSON output.
+For a list of dependencies read DEPS.
+
+NOTE: This is designed as a `backend' and not intended for human-readable output; unless you like reading JSON.
+NOTE2: By default comments and subjects are not saved (SLV_NOTEXT), I will make this configurable from the command eventually but look at changing StripLevel in the script to change what information is lossily compressed for now.
+
+-- Script --
+
+Usage:
+	python3 rtbw.py <board> <interval (in seconds)>
+	
+Supported options:
+	--buffer <buffer>: Specify a file buffer instead of using memory, can be useful if you plan on keeping large records/archives. (Uhh, it's a little unstable at the moment sorry)
+	--daemon <socket>: Start in daemon mode (see below).
+	--api <url>: Change the 4chan API url. Can be used to specify the SSL API instead of the plaintext one. The default value is http://api.4chan.org/%s/ (`%s' is required for the board)
+	--debug: Set the debug flag. Various changes, most useful for starting the daemon without forking.
+
+-- Daemon control --
+
+The daemon listens only on an AF_UNIX socket. Specify the socket file when starting the daemon. (NOTE: It must not exist already)
+To control the daemon use rtbwctl.py. All output is in JSON and most commands have no output.
+There is no need to keep a PID file since the script forks itself and can be shut down internally. (unless --debug flag is on)
+
+Usage:
+	python3 rtbwctl.py <socket> <command>
+
+Supported options:
+	--data <data>: get and get-clear commands require a minimum post number. Specify 0 for everything. Other commands do not require this.
+
+Supported commands:
+	get: Return all posts after the specified post.
+	clear: Purge whole buffer.
+	get-clear: Return all posts and purge the buffer atomically. (You should use this insted of just get and then clear to prevent race conditions)
+	stop: Shut down the daemon.
+	pause: Keep listening but stop archiving.
+	resume: Restart after a pause
+	info: Return JSON object containing info about the daemon.
+
+There are also a bunch of scripts for quick starting and controlling the daemon (conf/* contains config for these)
+	
+
+In production at https://flanchan.moe/rtbw/
+

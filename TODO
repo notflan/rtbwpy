@@ -1,1 +1,4 @@
-Fix spooky skipping issue with file buffers
+Fix spooky skipping issue with file buffers.
+Make strip level configurable from command.
+Fix potential issue involving stickies and missing posts.
+Add flag for SSL API.
